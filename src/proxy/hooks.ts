@@ -60,7 +60,7 @@ export default async function openWindow(
   // false = going back in history
   setHistory: "push" | "replace" | false = "push"
 ) {
-  const n = win.open(undefined, target) as Win | null;
+  const n = win.open(undefined, target) as unknown as Win | null;
   if (!n) return console.error("failure");
   deleteWindow(n, false);
   // n.location.assign("about:blank");
@@ -199,8 +199,8 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
         let winTarget = event.shiftKey
           ? "new"
           : event.ctrlKey || event.button === 1
-          ? "_blank"
-          : anchor.target || "_self";
+            ? "_blank"
+            : anchor.target || "_self";
         if (
           (winTarget === "_top" && win.top === window) ||
           (winTarget === "_parent" && win.parent === window)
