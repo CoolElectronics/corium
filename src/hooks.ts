@@ -118,7 +118,7 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   win[sBlobUrls] = [];
   win[sTimeouts] = [];
 
-  const scripts = [];
+  const scripts: any = [];
 
   const res = await request(req, "document", win);
   // win properties may have cleared in the time it took to do an async request...
@@ -178,23 +178,31 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   ))
     link.remove();
 
+
+  const pushScript = async (script: HTMLScriptElement, code: string, relativePath: string) => {
+    if (script.type !== "module") {
+      scripts.push(code)
+    } else {
+      try {
+        const rewritten = await modulerewriter(code, new URL(relativePath + "/dummy.js"), win);
+        scripts.push(rewritten);
+      } catch (e) {
+        console.error("packer failed! " + e);
+      }
+    }
+  }
   for (const script of protoDom.querySelectorAll("script")) {
+    // console.log(script.innerHTML.includes("p8_update_layout"));
     if (script.src) {
       const { src } = script;
       const ssrc = await request(new Request(src), "script", win);
-      const code = await ssrc.text();
-      if (script.noModule && script.type !== "module") {
-        scripts.push(code)
-      } else {
-        const rewritten = modulerewriter(code, win);
-
-        console.log(rewritten);
-      }
-    } else if (script.innerText.length > 0) {
-      scripts.push(script.innerText);
+      // console.log(src);
+      await pushScript(script, await ssrc.text(), src.substring(0, src.lastIndexOf("/")));
     }
-    script.remove();
-    // scripts.push(rewrite)
+    if (script.innerHTML.length > 0) {
+      await pushScript(script, script.innerHTML, win[sLocation].toString());
+    }
+    // script.remove();
 
   }
 
@@ -365,11 +373,11 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   win.document.open();
   if (protoDom.doctype)
     win.document.write(`<!DOCTYPE ${protoDom.doctype.name}>`);
+  console.log(scripts);
   win.document.close();
 
   win.document.documentElement?.remove();
   win.document.append(protoDom.documentElement);
-
   for (const script of scripts) {
     try {
       win.window.eval(script);
@@ -377,5 +385,6 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
       console.error(e);
     }
   }
+
 }
 
