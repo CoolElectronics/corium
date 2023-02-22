@@ -10,7 +10,7 @@ const redirectStatusCodes = [300, 301, 302, 303, 304, 305, 307, 308];
 
 const cookie = new CookieJar(new WebStorageCookieStore());
 
-export async function  request(
+export async function request(
   req: Request,
   dest: RequestDestination,
   win: Win

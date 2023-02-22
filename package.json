@@ -1,10 +1,10 @@
 {
-  "name": "spadium",
+  "name": "corium",
   "version": "1.0.0-alpha.2",
-  "description": "Spadium is a JavaScript browser library that creates an IFrame and manually fetches every asset for a given website, allowing it to be rendered locally without any external requests.",
+  "description": "Spadium fork. https://github.com/e9x/Spadium",
   "author": {
-    "name": "David Reed",
-    "url": "https://github.com/e9x"
+    "name": "CoolElectronics",
+    "url": "https://github.com/CoolElectronics"
   },
   "license": "ISC",
   "files": [
@@ -14,7 +14,7 @@
     "index.js",
     "index.d.ts"
   ],
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/spadium.js",
   "exports": {
     ".": "./index.js",
@@ -28,7 +28,6 @@
   },
   "devDependencies": {
     "@types/css-tree": "^2.0.0",
-    "@types/preact-custom-element": "^4.0.1",
     "@types/tough-cookie": "^4.0.2",
     "@typescript-eslint/eslint-plugin": "^5.47.0",
     "@typescript-eslint/parser": "^5.47.0",
@@ -42,15 +41,16 @@
     "swc-loader": "^0.2.3",
     "typescript": "^4.9.4",
     "webpack": "^5.75.0",
-    "webpack-cli": "^5.0.1",
-    "webpack-dev-server": "^4.11.1"
+    "webpack-cli": "^5.0.1"
   },
   "dependencies": {
+    "@rollup/browser": "^3.17.2",
     "@swc/helpers": "^0.4.14",
     "@tomphttp/bare-client": "^1.1.2-beta.3",
+    "acorn": "^8.8.2",
+    "acorn-loose": "^8.3.0",
     "css-tree": "^2.3.1",
-    "preact": "^10.11.3",
-    "preact-custom-element": "^4.2.1",
+    "rollup": "^3.17.2",
     "srcset": "^5.0.0",
     "tough-cookie": "^4.1.2"
   }

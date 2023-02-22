@@ -13,7 +13,8 @@ import {
   sIframeSrc,
   sLocation,
 } from "./win";
-
+// @ts-ignore
+import modulerewriter from "./moduleRewrite";
 // history is saved on context basis
 const historyId = Math.random().toString(36);
 
@@ -117,6 +118,8 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   win[sBlobUrls] = [];
   win[sTimeouts] = [];
 
+  const scripts = [];
+
   const res = await request(req, "document", win);
   // win properties may have cleared in the time it took to do an async request...
   // set them again
@@ -175,7 +178,25 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   ))
     link.remove();
 
-  for (const script of protoDom.querySelectorAll("script")) script.remove();
+  for (const script of protoDom.querySelectorAll("script")) {
+    if (script.src) {
+      const { src } = script;
+      const ssrc = await request(new Request(src), "script", win);
+      const code = await ssrc.text();
+      if (script.noModule && script.type !== "module") {
+        scripts.push(code)
+      } else {
+        const rewritten = modulerewriter(code, win);
+
+        console.log(rewritten);
+      }
+    } else if (script.innerText.length > 0) {
+      scripts.push(script.innerText);
+    }
+    script.remove();
+    // scripts.push(rewrite)
+
+  }
 
   for (const iframe of protoDom.querySelectorAll("iframe")) {
     iframe[sIframeSrc] = iframe.src;
@@ -310,6 +331,8 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
       rewriteSrcset(srcset, win).then((srcset) => (s.srcset = srcset));
     }
 
+  // for (const svg of protoDom.querySelectorAll("link")) rewriteSVG(svg, win);
+
   for (const svg of protoDom.querySelectorAll("svg")) rewriteSVG(svg, win);
 
   for (const form of protoDom.querySelectorAll("form"))
@@ -346,4 +369,13 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
 
   win.document.documentElement?.remove();
   win.document.append(protoDom.documentElement);
+
+  for (const script of scripts) {
+    try {
+      win.window.eval(script);
+    } catch (e) {
+      console.error(e);
+    }
+  }
 }
+
