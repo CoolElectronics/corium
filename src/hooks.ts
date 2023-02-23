@@ -3,7 +3,6 @@ import type { SrcSetDefinition } from "srcset";
 import { parseSrcset, stringifySrcset } from "srcset";
 import parseRefreshHeader from "./parseRefresh";
 import { localizeResource, request, validProtocols } from "./request";
-import { rewriteStyle, simulateStyle, simulateStyleLink } from "./rewriteCSS";
 import type { ContentHistory, Win } from "./win";
 import {
   sTimeouts,
@@ -13,8 +12,12 @@ import {
   sIframeSrc,
   sLocation,
 } from "./win";
+
+import hook from "./jsHooks";
 // @ts-ignore
-import modulerewriter from "./moduleRewrite";
+import moduleRewrite from "./rewriters/modules";
+import jsRewrite from "./rewriters/js";
+import elementRewrite from "./rewriters/html";
 // history is saved on context basis
 const historyId = Math.random().toString(36);
 
@@ -61,6 +64,7 @@ export default async function openWindow(
   // false = going back in history
   setHistory: "push" | "replace" | false = "push"
 ) {
+  (win as unknown as HTMLIFrameElement).src = ""; // this clears any currently executing javascript
   const n = win.open(undefined, target) as unknown as Win | null;
   if (!n) return console.error("failure");
   deleteWindow(n, false);
@@ -118,7 +122,26 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   win[sBlobUrls] = [];
   win[sTimeouts] = [];
 
-  const scripts: any = [];
+  const scripts: string[] = [];
+  const scriptsDeferred: string[] = [];
+  const pushScript = async (script: HTMLScriptElement, code: string, relativePath: string) => {
+    if (script.type !== "module") {
+      if (script.defer)
+        scriptsDeferred.push(jsRewrite(code));
+      else
+        scripts.push(jsRewrite(code))
+    } else {
+      try {
+        const packed = await moduleRewrite(code, new URL(`${relativePath}/dummy.js`), win);
+        if (script.defer)
+          scriptsDeferred.push(jsRewrite(packed));
+        else
+          scripts.push(jsRewrite(packed));
+      } catch (e) {
+        console.error(`packer failed! - ${e}`);
+      }
+    }
+  }
 
   const res = await request(req, "document", win);
   // win properties may have cleared in the time it took to do an async request...
@@ -137,11 +160,12 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
   protoDom.head.append(base);
   win.document.head.append(base.cloneNode());
 
-  for (const noscript of protoDom.querySelectorAll("noscript")) {
-    const fragment = new DocumentFragment();
-    for (const child of noscript.children) fragment.append(child);
-    noscript.replaceWith(fragment);
+
+
+  for (const elm of protoDom.querySelectorAll("*")) {
+    await elementRewrite(elm, win, pushScript);
   }
+
 
   const refreshHeader =
     protoDom.querySelector<HTMLMetaElement>("meta[http-equiv='refresh']")
@@ -159,38 +183,10 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
       );
   }
 
-  for (const meta of protoDom.querySelectorAll("meta"))
-    if (!["encoding", "content-type"].includes(meta.httpEquiv)) meta.remove();
-
-  for (const node of protoDom.querySelectorAll<HTMLLinkElement>(
-    "link[rel='stylesheet']"
-  ))
-    node.replaceWith(await simulateStyleLink(node, win));
-
-  for (const node of protoDom.querySelectorAll<HTMLStyleElement>("style"))
-    node.replaceWith(await simulateStyle(node.textContent || "", win));
-
-  for (const node of protoDom.querySelectorAll<HTMLElement>("*[style]"))
-    await rewriteStyle(node.style, win);
-
-  for (const link of protoDom.querySelectorAll<HTMLLinkElement>(
-    "link[rel='preload']"
-  ))
-    link.remove();
 
 
-  const pushScript = async (script: HTMLScriptElement, code: string, relativePath: string) => {
-    if (script.type !== "module") {
-      scripts.push(code)
-    } else {
-      try {
-        const rewritten = await modulerewriter(code, new URL(relativePath + "/dummy.js"), win);
-        scripts.push(rewritten);
-      } catch (e) {
-        console.error("packer failed! " + e);
-      }
-    }
-  }
+
+
   for (const script of protoDom.querySelectorAll("script")) {
     // console.log(script.innerHTML.includes("p8_update_layout"));
     if (script.src) {
@@ -293,40 +289,6 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
       win[sBlobUrls].push(blobUrl);
     });
 
-    /*const mediaSource = new MediaSource();
-    const blobUrl = URL.createObjectURL(mediaSource);
-    video.src = blobUrl;
-    win[sBlobUrls].push(blobUrl);
-
-    mediaSource.addEventListener(
-      "sourceopen",
-      () =>
-        request(new Request(source.src), "video", win).then(async (res) => {
-          const reader = res.body?.getReader();
-          if (!reader) return;
-
-          const sourceBuffer = mediaSource.addSourceBuffer(source.type);
-
-          const read = () =>
-            reader.read().then(({ value, done }) => {
-              if (done) {
-                if (value) {
-                  sourceBuffer.appendBuffer(value);
-                  sourceBuffer.addEventListener("updateend", () =>
-                    mediaSource.endOfStream()
-                  );
-                } else mediaSource.endOfStream();
-              } else {
-                sourceBuffer.appendBuffer(value);
-                sourceBuffer.addEventListener("updateend", read);
-              }
-            });
-
-          read();
-        }),
-      { once: true }
-    );*/
-
     break;
   }
 
@@ -370,21 +332,35 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
       openWindow(req, "_self", win, client);
     });
 
+
   win.document.open();
+  hook(win.window);
+
   if (protoDom.doctype)
     win.document.write(`<!DOCTYPE ${protoDom.doctype.name}>`);
-  console.log(scripts);
-  win.document.close();
 
   win.document.documentElement?.remove();
   win.document.append(protoDom.documentElement);
-  for (const script of scripts) {
+  for (const code of scripts) {
     try {
-      win.window.eval(script);
+      const script = document.createElement("script");
+      script.type = "text/javascript";
+      script.innerHTML = code;
+      win.document.head.appendChild(script);
     } catch (e) {
       console.error(e);
     }
   }
-
+  win.document.close();
+  for (const code of scriptsDeferred) {
+    try {
+      const script = document.createElement("script");
+      script.type = "text/javascript";
+      script.innerHTML = code;
+      script.defer = true;
+      win.document.head.appendChild(script);
+    } catch (e) {
+      console.error(e);
+    }
+  }
 }
-
