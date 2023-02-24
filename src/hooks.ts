@@ -85,35 +85,6 @@ export default async function openWindow(
   }, 10);
 }
 
-async function rewriteSrcset(srcset: string, win: Win) {
-  const parsed = parseSrcset(srcset);
-  const newSrcset: SrcSetDefinition[] = [];
-
-  for (const src of parsed)
-    newSrcset.push({
-      url: await localizeResource(
-        new URL(src.url, win[sLocation]),
-        "image",
-        win
-      ),
-      ...(src.density ? { density: src.density } : {}),
-      ...(src.width ? { width: src.width } : {}),
-    });
-
-  return stringifySrcset(newSrcset);
-}
-
-function rewriteSVG(svg: SVGSVGElement, win: Win) {
-  for (const image of svg.querySelectorAll("image")) {
-    const href = image.getAttribute("xlink:href");
-    if (href) {
-      image.removeAttribute("xlink:href");
-      localizeResource(new URL(href, win[sLocation]), "image", win).then(
-        (url) => image.setAttribute("xlink:href", url)
-      );
-    }
-  }
-}
 
 async function loadDOM(req: Request, win: Win, client: BareClient) {
   if (!client) throw new TypeError("bad client");
@@ -163,7 +134,31 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
 
 
   for (const elm of protoDom.querySelectorAll("*")) {
-    await elementRewrite(elm, win, pushScript);
+    await elementRewrite(elm, win, pushScript, (event: any, node: any) => {
+
+      event.preventDefault();
+
+      const protocol = new URL(node.href).protocol;
+
+      if (protocol === "javascript:") return;
+
+      let winTarget = event.shiftKey
+        ? "new"
+        : event.ctrlKey || event.button === 1
+          ? "_blank"
+          : node.target || "_self";
+      if (
+        (winTarget === "_top" && win.top === window) ||
+        (winTarget === "_parent" && win.parent === window)
+      )
+        winTarget = "_self";
+
+      if (!validProtocols.includes(protocol))
+        return win.open(node.href, winTarget);
+
+      openWindow(new Request(node.href), winTarget, win, client);
+
+    });
   }
 
 
@@ -183,154 +178,6 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
       );
   }
 
-
-
-
-
-  for (const script of protoDom.querySelectorAll("script")) {
-    // console.log(script.innerHTML.includes("p8_update_layout"));
-    if (script.src) {
-      const { src } = script;
-      const ssrc = await request(new Request(src), "script", win);
-      // console.log(src);
-      await pushScript(script, await ssrc.text(), src.substring(0, src.lastIndexOf("/")));
-    }
-    if (script.innerHTML.length > 0) {
-      await pushScript(script, script.innerHTML, win[sLocation].toString());
-    }
-    // script.remove();
-
-  }
-
-  for (const iframe of protoDom.querySelectorAll("iframe")) {
-    iframe[sIframeSrc] = iframe.src;
-    iframe.src = "";
-    iframe.removeAttribute("sandbox");
-    iframe.removeAttribute("allow");
-  }
-
-  for (const anchor of protoDom.querySelectorAll("a")) {
-    if (anchor.ping) anchor.ping = "";
-
-    anchor.addEventListener(
-      "click",
-      (event) => {
-        event.preventDefault();
-
-        const protocol = new URL(anchor.href).protocol;
-
-        if (protocol === "javascript:") return;
-
-        let winTarget = event.shiftKey
-          ? "new"
-          : event.ctrlKey || event.button === 1
-            ? "_blank"
-            : anchor.target || "_self";
-        if (
-          (winTarget === "_top" && win.top === window) ||
-          (winTarget === "_parent" && win.parent === window)
-        )
-          winTarget = "_self";
-
-        if (!validProtocols.includes(protocol))
-          return win.open(anchor.href, winTarget);
-
-        openWindow(new Request(anchor.href), winTarget, win, client);
-      },
-      {
-        // preventDefault stops middle clicking when capture is set to false
-        capture: false,
-      }
-    );
-  }
-
-  for (const img of protoDom.querySelectorAll("img"))
-    if (img.src) {
-      const { src } = img;
-      img.src = "";
-      // asynchronously load images
-      localizeResource(src, "image", win).then((url) => (img.src = url));
-    }
-
-  for (const video of protoDom.querySelectorAll("video")) {
-    if (video.poster) {
-      const { poster } = video;
-      localizeResource(poster, "image", win).then(
-        (url) => (video.poster = url)
-      );
-      video.poster = "";
-    }
-
-    // capture type & src before we detach the sources
-    const sources = [...video.querySelectorAll("source")].map((source) => ({
-      type: source.type,
-      src: source.src,
-    }));
-
-    for (const track of protoDom.querySelectorAll("track"))
-      if (track.src) {
-        const { src } = track;
-        track.src = "";
-        // asynchronously load track
-        localizeResource(src, "track", win).then((url) => (track.src = url));
-      }
-
-    for (const source of video.querySelectorAll("source")) source.remove();
-
-    const source = sources.find((source) =>
-      MediaSource.isTypeSupported(source.type)
-    );
-
-    if (!source) continue;
-
-    request(new Request(source.src), "video", win).then(async (res) => {
-      const blobUrl = URL.createObjectURL(await res.blob());
-      video.src = blobUrl;
-      win[sBlobUrls].push(blobUrl);
-    });
-
-    break;
-  }
-
-  for (const s of protoDom.querySelectorAll<
-    HTMLImageElement | HTMLSourceElement
-  >("img,source"))
-    if (s.srcset) {
-      const { srcset } = s;
-      s.srcset = "";
-      rewriteSrcset(srcset, win).then((srcset) => (s.srcset = srcset));
-    }
-
-  // for (const svg of protoDom.querySelectorAll("link")) rewriteSVG(svg, win);
-
-  for (const svg of protoDom.querySelectorAll("svg")) rewriteSVG(svg, win);
-
-  for (const form of protoDom.querySelectorAll("form"))
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const query = new URLSearchParams();
-
-      for (let i = 0; i < form.elements.length; i++) {
-        const node = form.elements[i] as HTMLInputElement;
-        query.set(node.name, node.value);
-      }
-
-      let req: Request;
-
-      if (form.method === "post") {
-        req = new Request(form.action, {
-          method: "POST",
-          body: query,
-        });
-      } else {
-        const url = new URL(form.action);
-        url.search = `?${query}`;
-
-        req = new Request(url);
-      }
-
-      openWindow(req, "_self", win, client);
-    });
 
 
   win.document.open();
