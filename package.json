@@ -47,9 +47,13 @@
     "@rollup/browser": "^3.17.2",
     "@swc/helpers": "^0.4.14",
     "@tomphttp/bare-client": "^1.1.2-beta.3",
+    "@types/escodegen": "^0.0.7",
     "acorn": "^8.8.2",
     "acorn-loose": "^8.3.0",
+    "ast-types": "^0.14.2",
     "css-tree": "^2.3.1",
+    "escodegen": "^2.0.0",
+    "meriyah": "^4.3.5",
     "rollup": "^3.17.2",
     "srcset": "^5.0.0",
     "tough-cookie": "^4.1.2"

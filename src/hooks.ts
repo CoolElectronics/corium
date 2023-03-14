@@ -188,6 +188,7 @@ async function loadDOM(req: Request, win: Win, client: BareClient) {
 
   win.document.documentElement?.remove();
   win.document.append(protoDom.documentElement);
+  window["scrs"] = scripts;
   for (const code of scripts) {
     try {
       const script = document.createElement("script");
